@@ -1,0 +1,19 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: healthflow-postgres
+    restart: unless-stopped
+
+    environment:
+      POSTGRES_USER: healthflow
+      POSTGRES_PASSWORD: healthflow_password
+      POSTGRES_DB: healthflow
+
+    ports:
+      - "5433:5432"
+
+    volumes:
+      - healthflow_postgres_data:/var/lib/postgresql/data
+
+volumes:
+  healthflow_postgres_data:
