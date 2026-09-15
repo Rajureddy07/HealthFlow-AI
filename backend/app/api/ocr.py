@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from app.database.session import get_db
 from app.models.document import Document, OCRResult
 from app.services.ocr_service import OCRService
+from app.services.ocr_quality_service import OCRQualityService
 
 
 router = APIRouter(
@@ -15,6 +16,7 @@ router = APIRouter(
 
 
 ocr_service = OCRService()
+quality_service = OCRQualityService()
 
 
 @router.post("/{document_id}")
@@ -22,7 +24,7 @@ def extract_text(
     document_id: int,
     db: Session = Depends(get_db)
 ):
-    # 1. Find the document in the database
+    # 1. Find document
     document = db.query(Document).filter(
         Document.id == document_id
     ).first()
@@ -33,7 +35,7 @@ def extract_text(
             detail="Document not found"
         )
 
-    # 2. Locate the uploaded file
+    # 2. Locate uploaded file
     file_path = Path("uploads") / document.file_name
 
     if not file_path.exists():
@@ -47,9 +49,8 @@ def extract_text(
         str(file_path)
     )
 
-    # 4. Save OCR results to database
+    # 4. Save OCR results
     for result in results:
-
         ocr_record = OCRResult(
             document_id=document.id,
             text=result["text"],
@@ -60,15 +61,22 @@ def extract_text(
 
     db.commit()
 
-    # 5. Update document status
-    document.status = "OCR_COMPLETED"
+    # 5. Check OCR quality
+    quality_result = quality_service.check_quality(results)
+
+    # 6. Update document status
+    if quality_result["quality_status"] == "PASSED":
+        document.status = "OCR_QUALITY_PASSED"
+    else:
+        document.status = "NEEDS_REVIEW"
 
     db.commit()
 
-    # 6. Return OCR results
+    # 7. Return processing result
     return {
         "document_id": document.id,
         "file_name": document.file_name,
         "status": document.status,
+        "quality": quality_result,
         "text": results
     }
