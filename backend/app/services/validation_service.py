@@ -1,25 +1,51 @@
 from app.schemas.extraction import PrescriptionExtraction
+from app.schemas.extraction import ExtractionEvidence
 from app.schemas.validation import (
     ValidationIssue,
-    ValidationResult
+    ValidationResult,
 )
 
 
 class ValidationService:
 
+    # Critical fields must have strong evidence
+    CRITICAL_FIELDS = {
+        "medicine_name",
+        "strength",
+    }
+
+    # Minimum evidence confidence required
+    # for critical fields
+    MIN_CRITICAL_CONFIDENCE = 0.80
+
     def validate(
         self,
         extraction: PrescriptionExtraction,
+        evidence: ExtractionEvidence,
         ocr_text: str
     ) -> ValidationResult:
 
         issues = []
 
-        # --------------------------------
-        # 1. Medicine name validation
-        # --------------------------------
+        # --------------------------------------------------
+        # Create easy lookup for field evidence
+        # --------------------------------------------------
+
+        evidence_map = {
+            field.field: field
+            for field in evidence.fields
+        }
+
+        # ==================================================
+        # 1. MEDICINE NAME
+        # ==================================================
+
+        medicine_evidence = evidence_map.get(
+            "medicine_name"
+        )
 
         if not extraction.medicine_name:
+
             issues.append(
                 ValidationIssue(
                     field="medicine_name",
@@ -28,11 +54,55 @@ class ValidationService:
                 )
             )
 
-        # --------------------------------
-        # 2. Strength validation
-        # --------------------------------
+        elif not medicine_evidence:
 
-        if not extraction.strength:
+            issues.append(
+                ValidationIssue(
+                    field="medicine_name",
+                    message="No evidence found for medicine name",
+                    severity="HIGH"
+                )
+            )
+
+        elif medicine_evidence.status in {
+            "MISSING",
+            "UNSUPPORTED"
+        }:
+
+            issues.append(
+                ValidationIssue(
+                    field="medicine_name",
+                    message="Medicine name is not sufficiently supported by OCR evidence",
+                    severity="HIGH"
+                )
+            )
+
+        elif (
+            medicine_evidence.confidence
+            < self.MIN_CRITICAL_CONFIDENCE
+        ):
+
+            issues.append(
+                ValidationIssue(
+                    field="medicine_name",
+                    message="Medicine name has low OCR evidence confidence",
+                    severity="HIGH"
+                )
+            )
+
+        # ==================================================
+        # 2. STRENGTH
+        # ==================================================
+
+        strength_evidence = evidence_map.get(
+            "strength"
+        )
+
+        if (
+            not extraction.strength
+            or not extraction.strength.value
+        ):
+
             issues.append(
                 ValidationIssue(
                     field="strength",
@@ -41,11 +111,52 @@ class ValidationService:
                 )
             )
 
-        # --------------------------------
-        # 3. Dosage form validation
-        # --------------------------------
+        elif not strength_evidence:
+
+            issues.append(
+                ValidationIssue(
+                    field="strength",
+                    message="No evidence found for medicine strength",
+                    severity="HIGH"
+                )
+            )
+
+        elif strength_evidence.status in {
+            "MISSING",
+            "UNSUPPORTED"
+        }:
+
+            issues.append(
+                ValidationIssue(
+                    field="strength",
+                    message="Medicine strength is not supported by OCR evidence",
+                    severity="HIGH"
+                )
+            )
+
+        elif (
+            strength_evidence.confidence
+            < self.MIN_CRITICAL_CONFIDENCE
+        ):
+
+            issues.append(
+                ValidationIssue(
+                    field="strength",
+                    message="Medicine strength has low OCR evidence confidence",
+                    severity="HIGH"
+                )
+            )
+
+        # ==================================================
+        # 3. DOSAGE FORM
+        # ==================================================
+
+        dosage_evidence = evidence_map.get(
+            "dosage_form"
+        )
 
         if not extraction.dosage_form:
+
             issues.append(
                 ValidationIssue(
                     field="dosage_form",
@@ -54,53 +165,75 @@ class ValidationService:
                 )
             )
 
-        # --------------------------------
-        # 4. Check extracted values against
-        #    original OCR text
-        # --------------------------------
+        elif not dosage_evidence:
 
-        ocr_lower = ocr_text.lower()
-
-        if extraction.medicine_name:
-
-            medicine_name = (
-                extraction.medicine_name.lower()
+            issues.append(
+                ValidationIssue(
+                    field="dosage_form",
+                    message="No evidence found for dosage form",
+                    severity="MEDIUM"
+                )
             )
 
-            if medicine_name not in ocr_lower:
-                issues.append(
-                    ValidationIssue(
-                        field="medicine_name",
-                        message=(
-                            "Extracted medicine name "
-                            "was not found in OCR text"
-                        ),
-                        severity="HIGH"
-                    )
+        elif dosage_evidence.status in {
+            "MISSING",
+            "UNSUPPORTED"
+        }:
+
+            issues.append(
+                ValidationIssue(
+                    field="dosage_form",
+                    message="Dosage form is not supported by OCR evidence",
+                    severity="MEDIUM"
                 )
+            )
 
-        # --------------------------------
-        # 5. Calculate validation confidence
-        # --------------------------------
+        # ==================================================
+        # 4. FINAL DECISION
+        # ==================================================
 
-        if not issues:
-            confidence = 1.0
-            status = "PASSED"
+        high_issues = sum(
+            1
+            for issue in issues
+            if issue.severity == "HIGH"
+        )
+
+        medium_issues = sum(
+            1
+            for issue in issues
+            if issue.severity == "MEDIUM"
+        )
+
+        # --------------------------------------------------
+        # Any HIGH severity issue requires human review
+        # --------------------------------------------------
+
+        if high_issues > 0:
+
+            status = "NEEDS_REVIEW"
+
+            confidence = 0.40
+
+        # --------------------------------------------------
+        # Medium issues can also require review
+        # depending on future policy
+        # --------------------------------------------------
+
+        elif medium_issues > 0:
+
+            status = "NEEDS_REVIEW"
+
+            confidence = 0.70
+
+        # --------------------------------------------------
+        # No validation issues
+        # --------------------------------------------------
 
         else:
 
-            high_issues = sum(
-                1
-                for issue in issues
-                if issue.severity == "HIGH"
-            )
+            status = "PASSED"
 
-            if high_issues > 0:
-                confidence = 0.40
-            else:
-                confidence = 0.70
-
-            status = "NEEDS_REVIEW"
+            confidence = 1.0
 
         return ValidationResult(
             status=status,

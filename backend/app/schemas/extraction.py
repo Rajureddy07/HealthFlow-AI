@@ -23,3 +23,21 @@ class PrescriptionExtraction(BaseModel):
     instructions: Optional[str] = None
 
     frequency: Optional[str] = None
+
+
+class FieldEvidence(BaseModel):
+    field: str
+
+    value: Optional[str] = None
+
+    evidence: List[str] = Field(
+        default_factory=list
+    )
+
+    confidence: float
+
+    status: str
+
+
+class ExtractionEvidence(BaseModel):
+    fields: List[FieldEvidence]
