@@ -2,12 +2,21 @@ import { useEffect, useState } from "react";
 import axios from "axios";
 import "./App.css";
 
+const API_URL = "http://127.0.0.1:8000";
+
+
+// ==================================================
+// Types
+// ==================================================
+
+interface Strength {
+  value: string | null;
+}
+
 interface Extraction {
   medicine_name: string | null;
   active_ingredients: string[];
-  strength: {
-    value: string | null;
-  } | null;
+  strength: Strength | null;
   dosage_form: string | null;
   quantity: string | number | null;
   instructions: string | null;
@@ -32,11 +41,15 @@ interface ReviewData {
   document_id: number;
   file_name: string;
   status: string;
+  review_status: string;
   stage: string;
+
   extraction: Extraction | null;
+
   evidence: {
     fields: EvidenceField[];
   } | null;
+
   validation: {
     status: string;
     confidence: number;
@@ -44,73 +57,547 @@ interface ReviewData {
   } | null;
 }
 
+interface ReviewActionResponse {
+  message: string;
+  document_id: number;
+  status: string;
+  review_status: string;
+  action: string;
+  reviewer: string;
+  comment: string | null;
+  review_action_id: number;
+}
+
+
+// ==================================================
+// Get document ID from URL
+// Example:
+// /review/1
+// /review/2
+// /review/3
+// ==================================================
+
+function getDocumentIdFromUrl(): number {
+
+  const match = window.location.pathname.match(
+    /\/review\/(\d+)/
+  );
+
+  if (!match) {
+    return 1;
+  }
+
+  return Number(match[1]);
+}
+
+
+// ==================================================
+// App
+// ==================================================
+
 function App() {
-  const [data, setData] = useState<ReviewData | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
+
+  const documentId = getDocumentIdFromUrl();
+
+
+  // ==================================================
+  // Main data
+  // ==================================================
+
+  const [data, setData] =
+    useState<ReviewData | null>(null);
+
+  const [loading, setLoading] =
+    useState(true);
+
+  const [actionLoading, setActionLoading] =
+    useState(false);
+
+  const [error, setError] =
+    useState("");
+
+  const [successMessage, setSuccessMessage] =
+    useState("");
+
+
+  // ==================================================
+  // Editable fields
+  // ==================================================
+
+  const [medicineName, setMedicineName] =
+    useState("");
+
+  const [activeIngredients, setActiveIngredients] =
+    useState("");
+
+  const [strength, setStrength] =
+    useState("");
+
+  const [dosageForm, setDosageForm] =
+    useState("");
+
+  const [quantity, setQuantity] =
+    useState("");
+
+  const [instructions, setInstructions] =
+    useState("");
+
+  const [frequency, setFrequency] =
+    useState("");
+
+
+  // ==================================================
+  // Reviewer comment
+  // ==================================================
+
+  const [comment, setComment] =
+    useState("");
+
+
+  // ==================================================
+  // Load document
+  // ==================================================
 
   useEffect(() => {
-  const loadDocument = async () => {
-    console.log("Starting request...");
 
-    try {
-      const response = await axios.get(
-        "http://127.0.0.1:8000/api/documents/2/review"
-      );
+    const loadDocument = async () => {
 
-      console.log("Response received:");
-      console.log(response.data);
+      try {
 
-      setData(response.data);
+        setLoading(true);
+        setError("");
+        setSuccessMessage("");
 
-    } catch (error) {
-      console.error("API ERROR:", error);
-      setError("Failed to load document.");
+        const response =
+          await axios.get<ReviewData>(
+            `${API_URL}/api/documents/${documentId}/review`
+          );
 
-    } finally {
-      console.log("Request finished");
-      setLoading(false);
-    }
+        const reviewData = response.data;
+
+        setData(reviewData);
+
+
+        // ------------------------------------------
+        // Populate editable fields
+        // ------------------------------------------
+
+        const extraction =
+          reviewData.extraction;
+
+        setMedicineName(
+          extraction?.medicine_name ?? ""
+        );
+
+        setActiveIngredients(
+          extraction?.active_ingredients?.join(", ") ?? ""
+        );
+
+        setStrength(
+          extraction?.strength?.value ?? ""
+        );
+
+        setDosageForm(
+          extraction?.dosage_form ?? ""
+        );
+
+        setQuantity(
+          extraction?.quantity?.toString() ?? ""
+        );
+
+        setInstructions(
+          extraction?.instructions ?? ""
+        );
+
+        setFrequency(
+          extraction?.frequency ?? ""
+        );
+
+      } catch (err) {
+
+        console.error(err);
+
+        setError(
+          "Failed to load document."
+        );
+
+      } finally {
+
+        setLoading(false);
+
+      }
+
+    };
+
+
+    loadDocument();
+
+  }, [documentId]);
+
+
+  // ==================================================
+  // Get evidence
+  // ==================================================
+
+  const getEvidence = (
+    fieldName: string
+  ) => {
+
+    return data?.evidence?.fields.find(
+      (field) =>
+        field.field === fieldName
+    );
+
   };
 
-  loadDocument();
-}, []);
+
+  // ==================================================
+  // Build extraction payload
+  // ==================================================
+
+  const buildExtraction = (): Extraction => {
+
+    return {
+
+      medicine_name:
+        medicineName.trim() || null,
+
+      active_ingredients:
+        activeIngredients
+          .split(",")
+          .map((item) => item.trim())
+          .filter(Boolean),
+
+      strength: {
+        value:
+          strength.trim() || null
+      },
+
+      dosage_form:
+        dosageForm.trim() || null,
+
+      quantity:
+        quantity.trim() || null,
+
+      instructions:
+        instructions.trim() || null,
+
+      frequency:
+        frequency.trim() || null
+    };
+
+  };
+
+
+  // ==================================================
+  // Save Correction
+  // ==================================================
+
+  const saveCorrection = async () => {
+
+    if (!data) {
+      return;
+    }
+
+
+    try {
+
+      setActionLoading(true);
+
+      setError("");
+      setSuccessMessage("");
+
+
+      const response =
+        await axios.put(
+          `${API_URL}/api/documents/${data.document_id}/extraction`,
+          {
+            reviewer: "admin",
+
+            comment:
+              comment.trim() ||
+              "Corrected extracted information after reviewing the source document.",
+
+            extraction:
+              buildExtraction()
+          }
+        );
+
+
+      // ------------------------------------------
+      // Update frontend state
+      // ------------------------------------------
+
+      setData((previous) => {
+
+        if (!previous) {
+          return previous;
+        }
+
+        return {
+
+          ...previous,
+
+          extraction:
+            response.data.extraction,
+
+          review_status:
+            response.data.review_status
+
+        };
+
+      });
+
+
+      setSuccessMessage(
+        "Extraction correction saved successfully."
+      );
+
+
+    } catch (err: any) {
+
+      console.error(err);
+
+      setError(
+        err.response?.data?.detail ||
+        "Failed to save correction."
+      );
+
+    } finally {
+
+      setActionLoading(false);
+
+    }
+
+  };
+
+
+  // ==================================================
+  // Approve document
+  // ==================================================
+
+  const approveDocument = async () => {
+
+    if (!data) {
+      return;
+    }
+
+
+    try {
+
+      setActionLoading(true);
+
+      setError("");
+      setSuccessMessage("");
+
+
+      const response =
+        await axios.post<ReviewActionResponse>(
+          `${API_URL}/api/documents/${data.document_id}/approve`,
+          {
+            reviewer: "admin",
+
+            comment:
+              comment.trim() ||
+              "Reviewed extracted information against source document."
+          }
+        );
+
+
+      setData((previous) => {
+
+        if (!previous) {
+          return previous;
+        }
+
+        return {
+
+          ...previous,
+
+          review_status:
+            response.data.review_status
+
+        };
+
+      });
+
+
+      setSuccessMessage(
+        "Document approved successfully."
+      );
+
+      setComment("");
+
+
+    } catch (err: any) {
+
+      console.error(err);
+
+      setError(
+        err.response?.data?.detail ||
+        "Failed to approve document."
+      );
+
+    } finally {
+
+      setActionLoading(false);
+
+    }
+
+  };
+
+
+  // ==================================================
+  // Send Back
+  // ==================================================
+
+  const sendBackDocument = async () => {
+
+    if (!data) {
+      return;
+    }
+
+
+    if (!comment.trim()) {
+
+      setError(
+        "Please enter a comment before sending the document back."
+      );
+
+      return;
+
+    }
+
+
+    try {
+
+      setActionLoading(true);
+
+      setError("");
+      setSuccessMessage("");
+
+
+      const response =
+        await axios.post<ReviewActionResponse>(
+          `${API_URL}/api/documents/${data.document_id}/send-back`,
+          {
+            reviewer: "admin",
+            comment: comment.trim()
+          }
+        );
+
+
+      setData((previous) => {
+
+        if (!previous) {
+          return previous;
+        }
+
+        return {
+
+          ...previous,
+
+          review_status:
+            response.data.review_status
+
+        };
+
+      });
+
+
+      setSuccessMessage(
+        "Document sent back successfully."
+      );
+
+      setComment("");
+
+
+    } catch (err: any) {
+
+      console.error(err);
+
+      setError(
+        err.response?.data?.detail ||
+        "Failed to send document back."
+      );
+
+    } finally {
+
+      setActionLoading(false);
+
+    }
+
+  };
+
+
+  // ==================================================
+  // Loading
+  // ==================================================
 
   if (loading) {
+
     return (
       <div className="loading">
         Loading document...
       </div>
     );
+
   }
 
-  if (error) {
+
+  // ==================================================
+  // Error
+  // ==================================================
+
+  if (error && !data) {
+
     return (
       <div className="loading error">
         {error}
       </div>
     );
+
   }
+
 
   if (!data) {
     return null;
   }
 
-  const extraction = data.extraction;
 
-  const getEvidence = (fieldName: string) => {
-    return data.evidence?.fields.find(
-      (field) => field.field === fieldName
-    );
-  };
+  // ==================================================
+  // Evidence
+  // ==================================================
 
-  const medicineEvidence = getEvidence("medicine_name");
-  const strengthEvidence = getEvidence("strength");
-  const dosageEvidence = getEvidence("dosage_form");
-  const quantityEvidence = getEvidence("quantity");
+  const medicineEvidence =
+    getEvidence("medicine_name");
+
+  const strengthEvidence =
+    getEvidence("strength");
+
+  const dosageEvidence =
+    getEvidence("dosage_form");
+
+  const quantityEvidence =
+    getEvidence("quantity");
+
+
+  // ==================================================
+  // Review state
+  // ==================================================
+
+  const isPending =
+    data.review_status === "PENDING";
+
 
   return (
+
     <div className="app">
+
+
+      {/* ==========================================
+          HEADER
+      ========================================== */}
 
       <header className="header">
 
@@ -119,9 +606,19 @@ function App() {
         </div>
 
         <nav>
-          <button>Dashboard</button>
-          <button>Documents</button>
-          <button>Review Queue</button>
+
+          <button>
+            Dashboard
+          </button>
+
+          <button>
+            Documents
+          </button>
+
+          <button>
+            Review Queue
+          </button>
+
         </nav>
 
         <div className="user">
@@ -130,37 +627,113 @@ function App() {
 
       </header>
 
+
+      {/* ==========================================
+          MAIN
+      ========================================== */}
+
       <main className="main">
+
+
+        {/* ========================================
+            PAGE HEADER
+        ======================================== */}
 
         <div className="page-header">
 
           <div>
-            <h1>Human Review</h1>
+
+            <h1>
+              Human Review
+            </h1>
 
             <p>
-              Document #{data.document_id} ·{" "}
+              Document #{data.document_id}
+              {" · "}
               {data.file_name}
             </p>
+
           </div>
 
-          <div className="status-badge">
-            {data.status.replace("_", " ")}
+
+          <div className="status-container">
+
+            <div className="status-label">
+              AI Status
+            </div>
+
+            <div className="status-badge">
+              {data.status.replaceAll(
+                "_",
+                " "
+              )}
+            </div>
+
+
+            <div className="status-label review-label">
+              Human Review
+            </div>
+
+            <div
+              className={`review-status-badge ${
+                data.review_status.toLowerCase()
+              }`}
+            >
+              {data.review_status.replaceAll(
+                "_",
+                " "
+              )}
+            </div>
+
           </div>
 
         </div>
 
+
+        {/* ========================================
+            MESSAGES
+        ======================================== */}
+
+        {error && (
+
+          <div className="message error-message">
+            {error}
+          </div>
+
+        )}
+
+
+        {successMessage && (
+
+          <div className="message success-message">
+            {successMessage}
+          </div>
+
+        )}
+
+
+        {/* ========================================
+            REVIEW LAYOUT
+        ======================================== */}
+
         <section className="review-layout">
 
-          {/* SOURCE DOCUMENT */}
+
+          {/* ======================================
+              SOURCE DOCUMENT
+          ====================================== */}
 
           <div className="document-panel">
 
-            <h2>Source Document</h2>
+            <h2>
+              Source Document
+            </h2>
+
 
             <div className="document-preview">
 
               <img
-                src={`http://127.0.0.1:8000/uploads/${encodeURIComponent(
+                src={`${API_URL}/uploads/${encodeURIComponent(
                   data.file_name
                 )}`}
                 alt={data.file_name}
@@ -171,13 +744,20 @@ function App() {
           </div>
 
 
-          {/* EXTRACTION */}
+          {/* ======================================
+              EXTRACTION PANEL
+          ====================================== */}
 
           <div className="extraction-panel">
 
-            <h2>Extracted Information</h2>
+            <h2>
+              Extracted Information
+            </h2>
 
-            {/* MEDICINE */}
+
+            {/* ====================================
+                Medicine Name
+            ==================================== */}
 
             <div className="field">
 
@@ -185,16 +765,15 @@ function App() {
                 Medicine Name
               </label>
 
-              <div
-                className={`field-value ${
-                  medicineEvidence?.status === "LOW"
-                    ? "warning"
-                    : ""
-                }`}
-              >
-                {extraction?.medicine_name ||
-                  "Not extracted"}
-              </div>
+              <input
+                className="editable-field"
+                value={medicineName}
+                onChange={(event) =>
+                  setMedicineName(
+                    event.target.value
+                  )
+                }
+              />
 
               <div
                 className={`confidence ${
@@ -204,16 +783,40 @@ function App() {
                 }`}
               >
                 {medicineEvidence
-                  ? `${medicineEvidence.status} CONFIDENCE · ${(
-                      medicineEvidence.confidence * 100
-                    ).toFixed(2)}%`
+                  ? `${medicineEvidence.status} CONFIDENCE · ${(medicineEvidence.confidence * 100).toFixed(2)}%`
                   : "NO EVIDENCE"}
               </div>
 
             </div>
 
 
-            {/* STRENGTH */}
+            {/* ====================================
+                Active Ingredients
+            ==================================== */}
+
+            <div className="field">
+
+              <label>
+                Active Ingredients
+              </label>
+
+              <input
+                className="editable-field"
+                value={activeIngredients}
+                onChange={(event) =>
+                  setActiveIngredients(
+                    event.target.value
+                  )
+                }
+                placeholder="Separate multiple ingredients with commas"
+              />
+
+            </div>
+
+
+            {/* ====================================
+                Strength
+            ==================================== */}
 
             <div className="field">
 
@@ -221,12 +824,16 @@ function App() {
                 Strength
               </label>
 
-              <div className="field-value">
-
-                {extraction?.strength?.value ||
-                  "Not extracted"}
-
-              </div>
+              <input
+                className="editable-field"
+                value={strength}
+                onChange={(event) =>
+                  setStrength(
+                    event.target.value
+                  )
+                }
+                placeholder="Example: 500 mg / 125 mg"
+              />
 
               <div
                 className={`confidence ${
@@ -236,16 +843,16 @@ function App() {
                 }`}
               >
                 {strengthEvidence
-                  ? `${strengthEvidence.status} CONFIDENCE · ${(
-                      strengthEvidence.confidence * 100
-                    ).toFixed(2)}%`
+                  ? `${strengthEvidence.status} CONFIDENCE · ${(strengthEvidence.confidence * 100).toFixed(2)}%`
                   : "NO EVIDENCE"}
               </div>
 
             </div>
 
 
-            {/* DOSAGE FORM */}
+            {/* ====================================
+                Dosage Form
+            ==================================== */}
 
             <div className="field">
 
@@ -253,12 +860,15 @@ function App() {
                 Dosage Form
               </label>
 
-              <div className="field-value">
-
-                {extraction?.dosage_form ||
-                  "Not extracted"}
-
-              </div>
+              <input
+                className="editable-field"
+                value={dosageForm}
+                onChange={(event) =>
+                  setDosageForm(
+                    event.target.value
+                  )
+                }
+              />
 
               <div
                 className={`confidence ${
@@ -268,16 +878,16 @@ function App() {
                 }`}
               >
                 {dosageEvidence
-                  ? `${dosageEvidence.status} CONFIDENCE · ${(
-                      dosageEvidence.confidence * 100
-                    ).toFixed(2)}%`
+                  ? `${dosageEvidence.status} CONFIDENCE · ${(dosageEvidence.confidence * 100).toFixed(2)}%`
                   : "NO EVIDENCE"}
               </div>
 
             </div>
 
 
-            {/* QUANTITY */}
+            {/* ====================================
+                Quantity
+            ==================================== */}
 
             <div className="field">
 
@@ -285,29 +895,83 @@ function App() {
                 Quantity
               </label>
 
-              <div className="field-value missing">
+              <input
+                className="editable-field"
+                value={quantity}
+                onChange={(event) =>
+                  setQuantity(
+                    event.target.value
+                  )
+                }
+                placeholder="Example: 10"
+              />
 
-                {extraction?.quantity ??
-                  "Not extracted"}
-
+              <div
+                className={`confidence ${
+                  quantityEvidence?.status === "HIGH"
+                    ? "high"
+                    : "low"
+                }`}
+              >
+                {quantityEvidence
+                  ? `${quantityEvidence.status} CONFIDENCE · ${(quantityEvidence.confidence * 100).toFixed(2)}%`
+                  : "NO EVIDENCE"}
               </div>
-
-              {quantityEvidence && (
-                <div className="confidence low">
-
-                  {quantityEvidence.status} CONFIDENCE ·{" "}
-                  {(
-                    quantityEvidence.confidence * 100
-                  ).toFixed(2)}
-                  %
-
-                </div>
-              )}
 
             </div>
 
 
-            {/* VALIDATION */}
+            {/* ====================================
+                Instructions
+            ==================================== */}
+
+            <div className="field">
+
+              <label>
+                Instructions
+              </label>
+
+              <textarea
+                className="editable-field textarea-field"
+                value={instructions}
+                onChange={(event) =>
+                  setInstructions(
+                    event.target.value
+                  )
+                }
+                rows={3}
+              />
+
+            </div>
+
+
+            {/* ====================================
+                Frequency
+            ==================================== */}
+
+            <div className="field">
+
+              <label>
+                Frequency
+              </label>
+
+              <input
+                className="editable-field"
+                value={frequency}
+                onChange={(event) =>
+                  setFrequency(
+                    event.target.value
+                  )
+                }
+                placeholder="Example: Once daily"
+              />
+
+            </div>
+
+
+            {/* ====================================
+                Validation Issues
+            ==================================== */}
 
             {data.validation &&
               data.validation.issues.length > 0 && (
@@ -322,11 +986,15 @@ function App() {
                     (issue, index) => (
 
                       <p key={index}>
+
                         <b>
                           {issue.severity}
                         </b>
+
                         {" — "}
+
                         {issue.message}
+
                       </p>
 
                     )
@@ -337,19 +1005,171 @@ function App() {
               )}
 
 
-            {/* ACTIONS */}
+            {/* ====================================
+                Evidence
+            ==================================== */}
 
-            <div className="actions">
+            {data.evidence && (
 
-              <button className="approve">
-                Approve
-              </button>
+              <div className="evidence-section">
 
-              <button className="send-back">
-                Send Back
-              </button>
+                <h3>
+                  Evidence
+                </h3>
 
-            </div>
+
+                {data.evidence.fields.map(
+                  (field) => (
+
+                    <div
+                      className="evidence-field"
+                      key={field.field}
+                    >
+
+                      <div className="evidence-header">
+
+                        <strong>
+                          {field.field.replaceAll(
+                            "_",
+                            " "
+                          )}
+                        </strong>
+
+                        <span>
+                          {field.status}
+                          {" · "}
+                          {(field.confidence * 100).toFixed(2)}
+                          %
+                        </span>
+
+                      </div>
+
+
+                      {field.evidence.map(
+                        (item, index) => (
+
+                          <div
+                            className="evidence-item"
+                            key={index}
+                          >
+                            ✓ {item}
+                          </div>
+
+                        )
+                      )}
+
+                    </div>
+
+                  )
+                )}
+
+              </div>
+
+            )}
+
+
+            {/* ====================================
+                SAVE CORRECTION
+            ==================================== */}
+
+            {isPending && (
+
+              <div className="correction-section">
+
+                <button
+                  className="save-correction"
+                  onClick={saveCorrection}
+                  disabled={actionLoading}
+                >
+                  {actionLoading
+                    ? "Saving..."
+                    : "Save Correction"}
+                </button>
+
+              </div>
+
+            )}
+
+
+            {/* ====================================
+                REVIEW COMMENT
+            ==================================== */}
+
+            {isPending && (
+
+              <div className="review-actions">
+
+                <label>
+                  Reviewer Comment
+                </label>
+
+                <textarea
+                  value={comment}
+                  onChange={(event) =>
+                    setComment(
+                      event.target.value
+                    )
+                  }
+                  placeholder="Enter review comment..."
+                  rows={4}
+                />
+
+
+                {/* ==================================
+                    ACTION BUTTONS
+                ================================== */}
+
+                <div className="actions">
+
+                  <button
+                    className="approve"
+                    onClick={approveDocument}
+                    disabled={actionLoading}
+                  >
+                    {actionLoading
+                      ? "Processing..."
+                      : "Approve"}
+                  </button>
+
+
+                  <button
+                    className="send-back"
+                    onClick={sendBackDocument}
+                    disabled={actionLoading}
+                  >
+                    {actionLoading
+                      ? "Processing..."
+                      : "Send Back"}
+                  </button>
+
+                </div>
+
+              </div>
+
+            )}
+
+
+            {/* ====================================
+                COMPLETED REVIEW
+            ==================================== */}
+
+            {!isPending && (
+
+              <div className="review-complete">
+
+                Human review status:
+
+                <strong>
+                  {" "}
+                  {data.review_status.replaceAll(
+                    "_",
+                    " "
+                  )}
+                </strong>
+
+              </div>
+
+            )}
 
           </div>
 

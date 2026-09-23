@@ -2,8 +2,12 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.database.session import Base, engine
-from app.models.document import Document, OCRResult
-
+from app.models.document import (
+    Document,
+    OCRResult,
+    ProcessingResult,
+    ReviewAction
+)
 from app.api.documents import router as documents_router
 from app.api.ocr import router as ocr_router
 from fastapi.staticfiles import StaticFiles
