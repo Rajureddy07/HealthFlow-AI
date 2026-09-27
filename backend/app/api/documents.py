@@ -251,6 +251,36 @@ def process_document(
         "validation": result["validation"]
     }
 
+# ==================================================
+# Review Queue
+# ==================================================
+
+@router.get("/review-queue")
+def get_review_queue(
+    db: Session = Depends(get_db)
+):
+    documents = (
+        db.query(Document)
+        .filter(Document.review_status == "PENDING")
+        .order_by(Document.created_at.asc())
+        .all()
+    )
+
+    return {
+        "count": len(documents),
+        "documents": [
+            {
+                "document_id": document.id,
+                "file_name": document.file_name,
+                "document_type": document.document_type,
+                "status": document.status,
+                "review_status": document.review_status,
+                "created_at": document.created_at,
+            }
+            for document in documents
+        ]
+    }
+
 
 # ==================================================
 # Get Document Review
@@ -378,16 +408,33 @@ def update_extraction(
         )
 
     # ----------------------------------------------
+    # Prepare corrected extraction
+    # ----------------------------------------------
+
+    corrected_extraction = request.extraction.model_dump()
+
+    # ----------------------------------------------
+    # Prevent duplicate correction events
+    # ----------------------------------------------
+
+    if processing_result.extraction == corrected_extraction:
+        return {
+            "message": "No extraction changes detected",
+            "document_id": document.id,
+            "review_status": document.review_status,
+            "extraction": processing_result.extraction,
+            "action": "NO_CHANGE",
+            "reviewer": request.reviewer,
+            "comment": request.comment,
+            "review_action_id": None
+        }
+
+    # ----------------------------------------------
     # Save corrected extraction
     # ----------------------------------------------
 
-    corrected_extraction = (
-        request.extraction.model_dump()
-    )
+    processing_result.extraction = corrected_extraction
 
-    processing_result.extraction = (
-        corrected_extraction
-    )
 
     # ----------------------------------------------
     # Create audit record

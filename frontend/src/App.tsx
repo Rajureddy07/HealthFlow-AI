@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
 import axios from "axios";
 import "./App.css";
+import ReviewQueue from "./ReviewQueue";
 
 const API_URL = "http://127.0.0.1:8000";
-
 
 // ==================================================
 // Types
@@ -62,23 +62,18 @@ interface ReviewActionResponse {
   document_id: number;
   status: string;
   review_status: string;
+  extraction?: Extraction;
   action: string;
   reviewer: string;
   comment: string | null;
-  review_action_id: number;
+  review_action_id: number | null;
 }
-
 
 // ==================================================
 // Get document ID from URL
-// Example:
-// /review/1
-// /review/2
-// /review/3
 // ==================================================
 
 function getDocumentIdFromUrl(): number {
-
   const match = window.location.pathname.match(
     /\/review\/(\d+)/
   );
@@ -90,15 +85,15 @@ function getDocumentIdFromUrl(): number {
   return Number(match[1]);
 }
 
-
 // ==================================================
 // App
 // ==================================================
 
 function App() {
-
   const documentId = getDocumentIdFromUrl();
 
+  const isReviewQueuePage =
+    window.location.pathname === "/review-queue";
 
   // ==================================================
   // Main data
@@ -119,6 +114,12 @@ function App() {
   const [successMessage, setSuccessMessage] =
     useState("");
 
+  // ==================================================
+  // Unsaved changes
+  // ==================================================
+
+  const [hasUnsavedChanges, setHasUnsavedChanges] =
+    useState(false);
 
   // ==================================================
   // Editable fields
@@ -145,7 +146,6 @@ function App() {
   const [frequency, setFrequency] =
     useState("");
 
-
   // ==================================================
   // Reviewer comment
   // ==================================================
@@ -153,20 +153,26 @@ function App() {
   const [comment, setComment] =
     useState("");
 
-
   // ==================================================
   // Load document
   // ==================================================
 
   useEffect(() => {
-
     const loadDocument = async () => {
 
-      try {
+      // IMPORTANT:
+      // Review Queue has its own API and does not
+      // need to load document #1.
+      if (isReviewQueuePage) {
+        setLoading(false);
+        return;
+      }
 
+      try {
         setLoading(true);
         setError("");
         setSuccessMessage("");
+        setHasUnsavedChanges(false);
 
         const response =
           await axios.get<ReviewData>(
@@ -176,11 +182,6 @@ function App() {
         const reviewData = response.data;
 
         setData(reviewData);
-
-
-        // ------------------------------------------
-        // Populate editable fields
-        // ------------------------------------------
 
         const extraction =
           reviewData.extraction;
@@ -213,8 +214,9 @@ function App() {
           extraction?.frequency ?? ""
         );
 
-      } catch (err) {
+        setComment("");
 
+      } catch (err) {
         console.error(err);
 
         setError(
@@ -222,18 +224,13 @@ function App() {
         );
 
       } finally {
-
         setLoading(false);
-
       }
-
     };
-
 
     loadDocument();
 
-  }, [documentId]);
-
+  }, [documentId, isReviewQueuePage]);
 
   // ==================================================
   // Get evidence
@@ -242,23 +239,18 @@ function App() {
   const getEvidence = (
     fieldName: string
   ) => {
-
     return data?.evidence?.fields.find(
       (field) =>
         field.field === fieldName
     );
-
   };
 
-
   // ==================================================
-  // Build extraction payload
+  // Build extraction
   // ==================================================
 
   const buildExtraction = (): Extraction => {
-
     return {
-
       medicine_name:
         medicineName.trim() || null,
 
@@ -285,31 +277,32 @@ function App() {
       frequency:
         frequency.trim() || null
     };
-
   };
-
 
   // ==================================================
   // Save Correction
   // ==================================================
 
   const saveCorrection = async () => {
-
     if (!data) {
       return;
     }
 
+    if (!hasUnsavedChanges) {
+      return;
+    }
+
+    if (actionLoading) {
+      return;
+    }
 
     try {
-
       setActionLoading(true);
-
       setError("");
       setSuccessMessage("");
 
-
       const response =
-        await axios.put(
+        await axios.put<ReviewActionResponse>(
           `${API_URL}/api/documents/${data.document_id}/extraction`,
           {
             reviewer: "admin",
@@ -323,39 +316,32 @@ function App() {
           }
         );
 
-
-      // ------------------------------------------
-      // Update frontend state
-      // ------------------------------------------
-
       setData((previous) => {
-
         if (!previous) {
           return previous;
         }
 
         return {
-
           ...previous,
 
           extraction:
-            response.data.extraction,
+            response.data.extraction ??
+            previous.extraction,
 
           review_status:
             response.data.review_status
-
         };
-
       });
 
+      setHasUnsavedChanges(false);
 
       setSuccessMessage(
-        "Extraction correction saved successfully."
+        response.data.action === "NO_CHANGE"
+          ? "No extraction changes detected."
+          : "Extraction correction saved successfully."
       );
 
-
     } catch (err: any) {
-
       console.error(err);
 
       setError(
@@ -364,32 +350,35 @@ function App() {
       );
 
     } finally {
-
       setActionLoading(false);
-
     }
-
   };
 
-
   // ==================================================
-  // Approve document
+  // Approve Document
   // ==================================================
 
   const approveDocument = async () => {
-
     if (!data) {
       return;
     }
 
+    if (actionLoading) {
+      return;
+    }
+
+    if (hasUnsavedChanges) {
+      setError(
+        "Please save your extraction correction before approving the document."
+      );
+
+      return;
+    }
 
     try {
-
       setActionLoading(true);
-
       setError("");
       setSuccessMessage("");
-
 
       const response =
         await axios.post<ReviewActionResponse>(
@@ -403,34 +392,27 @@ function App() {
           }
         );
 
-
       setData((previous) => {
-
         if (!previous) {
           return previous;
         }
 
         return {
-
           ...previous,
 
           review_status:
             response.data.review_status
-
         };
-
       });
-
 
       setSuccessMessage(
         "Document approved successfully."
       );
 
       setComment("");
-
+      setHasUnsavedChanges(false);
 
     } catch (err: any) {
-
       console.error(err);
 
       setError(
@@ -439,43 +421,43 @@ function App() {
       );
 
     } finally {
-
       setActionLoading(false);
-
     }
-
   };
-
 
   // ==================================================
   // Send Back
   // ==================================================
 
   const sendBackDocument = async () => {
-
     if (!data) {
       return;
     }
 
+    if (actionLoading) {
+      return;
+    }
 
     if (!comment.trim()) {
-
       setError(
         "Please enter a comment before sending the document back."
       );
 
       return;
-
     }
 
+    if (hasUnsavedChanges) {
+      setError(
+        "Please save your extraction correction before sending the document back."
+      );
+
+      return;
+    }
 
     try {
-
       setActionLoading(true);
-
       setError("");
       setSuccessMessage("");
-
 
       const response =
         await axios.post<ReviewActionResponse>(
@@ -486,34 +468,27 @@ function App() {
           }
         );
 
-
       setData((previous) => {
-
         if (!previous) {
           return previous;
         }
 
         return {
-
           ...previous,
 
           review_status:
             response.data.review_status
-
         };
-
       });
-
 
       setSuccessMessage(
         "Document sent back successfully."
       );
 
       setComment("");
-
+      setHasUnsavedChanges(false);
 
     } catch (err: any) {
-
       console.error(err);
 
       setError(
@@ -522,48 +497,45 @@ function App() {
       );
 
     } finally {
-
       setActionLoading(false);
-
     }
-
   };
 
+  // ==================================================
+  // Review Queue Page
+  // ==================================================
+
+  if (isReviewQueuePage) {
+    return <ReviewQueue />;
+  }
 
   // ==================================================
   // Loading
   // ==================================================
 
   if (loading) {
-
     return (
       <div className="loading">
         Loading document...
       </div>
     );
-
   }
-
 
   // ==================================================
   // Error
   // ==================================================
 
   if (error && !data) {
-
     return (
       <div className="loading error">
         {error}
       </div>
     );
-
   }
-
 
   if (!data) {
     return null;
   }
-
 
   // ==================================================
   // Evidence
@@ -581,7 +553,6 @@ function App() {
   const quantityEvidence =
     getEvidence("quantity");
 
-
   // ==================================================
   // Review state
   // ==================================================
@@ -589,11 +560,12 @@ function App() {
   const isPending =
     data.review_status === "PENDING";
 
+  // ==================================================
+  // Render Human Review
+  // ==================================================
 
   return (
-
     <div className="app">
-
 
       {/* ==========================================
           HEADER
@@ -607,7 +579,11 @@ function App() {
 
         <nav>
 
-          <button>
+          <button
+            onClick={() => {
+              window.location.href = "/";
+            }}
+          >
             Dashboard
           </button>
 
@@ -615,7 +591,12 @@ function App() {
             Documents
           </button>
 
-          <button>
+          <button
+            onClick={() => {
+              window.location.href =
+                "/review-queue";
+            }}
+          >
             Review Queue
           </button>
 
@@ -627,13 +608,11 @@ function App() {
 
       </header>
 
-
       {/* ==========================================
           MAIN
       ========================================== */}
 
       <main className="main">
-
 
         {/* ========================================
             PAGE HEADER
@@ -655,7 +634,6 @@ function App() {
 
           </div>
 
-
           <div className="status-container">
 
             <div className="status-label">
@@ -668,7 +646,6 @@ function App() {
                 " "
               )}
             </div>
-
 
             <div className="status-label review-label">
               Human Review
@@ -689,35 +666,27 @@ function App() {
 
         </div>
 
-
         {/* ========================================
             MESSAGES
         ======================================== */}
 
         {error && (
-
           <div className="message error-message">
             {error}
           </div>
-
         )}
 
-
         {successMessage && (
-
           <div className="message success-message">
             {successMessage}
           </div>
-
         )}
-
 
         {/* ========================================
             REVIEW LAYOUT
         ======================================== */}
 
         <section className="review-layout">
-
 
           {/* ======================================
               SOURCE DOCUMENT
@@ -728,7 +697,6 @@ function App() {
             <h2>
               Source Document
             </h2>
-
 
             <div className="document-preview">
 
@@ -743,7 +711,6 @@ function App() {
 
           </div>
 
-
           {/* ======================================
               EXTRACTION PANEL
           ====================================== */}
@@ -754,10 +721,7 @@ function App() {
               Extracted Information
             </h2>
 
-
-            {/* ====================================
-                Medicine Name
-            ==================================== */}
+            {/* Medicine Name */}
 
             <div className="field">
 
@@ -768,11 +732,17 @@ function App() {
               <input
                 className="editable-field"
                 value={medicineName}
-                onChange={(event) =>
+                disabled={
+                  !isPending ||
+                  actionLoading
+                }
+                onChange={(event) => {
                   setMedicineName(
                     event.target.value
-                  )
-                }
+                  );
+
+                  setHasUnsavedChanges(true);
+                }}
               />
 
               <div
@@ -789,10 +759,7 @@ function App() {
 
             </div>
 
-
-            {/* ====================================
-                Active Ingredients
-            ==================================== */}
+            {/* Active Ingredients */}
 
             <div className="field">
 
@@ -803,20 +770,23 @@ function App() {
               <input
                 className="editable-field"
                 value={activeIngredients}
-                onChange={(event) =>
+                disabled={
+                  !isPending ||
+                  actionLoading
+                }
+                onChange={(event) => {
                   setActiveIngredients(
                     event.target.value
-                  )
-                }
+                  );
+
+                  setHasUnsavedChanges(true);
+                }}
                 placeholder="Separate multiple ingredients with commas"
               />
 
             </div>
 
-
-            {/* ====================================
-                Strength
-            ==================================== */}
+            {/* Strength */}
 
             <div className="field">
 
@@ -827,11 +797,17 @@ function App() {
               <input
                 className="editable-field"
                 value={strength}
-                onChange={(event) =>
+                disabled={
+                  !isPending ||
+                  actionLoading
+                }
+                onChange={(event) => {
                   setStrength(
                     event.target.value
-                  )
-                }
+                  );
+
+                  setHasUnsavedChanges(true);
+                }}
                 placeholder="Example: 500 mg / 125 mg"
               />
 
@@ -849,10 +825,7 @@ function App() {
 
             </div>
 
-
-            {/* ====================================
-                Dosage Form
-            ==================================== */}
+            {/* Dosage Form */}
 
             <div className="field">
 
@@ -863,11 +836,17 @@ function App() {
               <input
                 className="editable-field"
                 value={dosageForm}
-                onChange={(event) =>
+                disabled={
+                  !isPending ||
+                  actionLoading
+                }
+                onChange={(event) => {
                   setDosageForm(
                     event.target.value
-                  )
-                }
+                  );
+
+                  setHasUnsavedChanges(true);
+                }}
               />
 
               <div
@@ -884,10 +863,7 @@ function App() {
 
             </div>
 
-
-            {/* ====================================
-                Quantity
-            ==================================== */}
+            {/* Quantity */}
 
             <div className="field">
 
@@ -898,11 +874,17 @@ function App() {
               <input
                 className="editable-field"
                 value={quantity}
-                onChange={(event) =>
+                disabled={
+                  !isPending ||
+                  actionLoading
+                }
+                onChange={(event) => {
                   setQuantity(
                     event.target.value
-                  )
-                }
+                  );
+
+                  setHasUnsavedChanges(true);
+                }}
                 placeholder="Example: 10"
               />
 
@@ -920,10 +902,7 @@ function App() {
 
             </div>
 
-
-            {/* ====================================
-                Instructions
-            ==================================== */}
+            {/* Instructions */}
 
             <div className="field">
 
@@ -934,20 +913,23 @@ function App() {
               <textarea
                 className="editable-field textarea-field"
                 value={instructions}
-                onChange={(event) =>
+                disabled={
+                  !isPending ||
+                  actionLoading
+                }
+                onChange={(event) => {
                   setInstructions(
                     event.target.value
-                  )
-                }
+                  );
+
+                  setHasUnsavedChanges(true);
+                }}
                 rows={3}
               />
 
             </div>
 
-
-            {/* ====================================
-                Frequency
-            ==================================== */}
+            {/* Frequency */}
 
             <div className="field">
 
@@ -958,56 +940,66 @@ function App() {
               <input
                 className="editable-field"
                 value={frequency}
-                onChange={(event) =>
+                disabled={
+                  !isPending ||
+                  actionLoading
+                }
+                onChange={(event) => {
                   setFrequency(
                     event.target.value
-                  )
-                }
+                  );
+
+                  setHasUnsavedChanges(true);
+                }}
                 placeholder="Example: Once daily"
               />
 
             </div>
 
+            {/* Unsaved Changes */}
 
-            {/* ====================================
-                Validation Issues
-            ==================================== */}
+            {isPending &&
+              hasUnsavedChanges && (
+                <div className="message warning-message">
+                  You have unsaved extraction changes.
+                  Save them before approving or sending
+                  the document back.
+                </div>
+              )}
+
+            {/* Validation */}
 
             {data.validation &&
               data.validation.issues.length > 0 && (
 
-                <div className="validation-box">
+              <div className="validation-box">
 
-                  <strong>
-                    Validation Issues
-                  </strong>
+                <strong>
+                  Validation Issues
+                </strong>
 
-                  {data.validation.issues.map(
-                    (issue, index) => (
+                {data.validation.issues.map(
+                  (issue, index) => (
 
-                      <p key={index}>
+                    <p key={index}>
 
-                        <b>
-                          {issue.severity}
-                        </b>
+                      <b>
+                        {issue.severity}
+                      </b>
 
-                        {" — "}
+                      {" — "}
 
-                        {issue.message}
+                      {issue.message}
 
-                      </p>
+                    </p>
 
-                    )
-                  )}
+                  )
+                )}
 
-                </div>
+              </div>
+            )}
 
-              )}
-
-
-            {/* ====================================
-                Evidence
-            ==================================== */}
+            {/* Evidence */}
 
             {data.evidence && (
 
@@ -1016,7 +1008,6 @@ function App() {
                 <h3>
                   Evidence
                 </h3>
-
 
                 {data.evidence.fields.map(
                   (field) => (
@@ -1044,7 +1035,6 @@ function App() {
 
                       </div>
 
-
                       {field.evidence.map(
                         (item, index) => (
 
@@ -1059,18 +1049,13 @@ function App() {
                       )}
 
                     </div>
-
                   )
                 )}
 
               </div>
-
             )}
 
-
-            {/* ====================================
-                SAVE CORRECTION
-            ==================================== */}
+            {/* Save Correction */}
 
             {isPending && (
 
@@ -1079,21 +1064,22 @@ function App() {
                 <button
                   className="save-correction"
                   onClick={saveCorrection}
-                  disabled={actionLoading}
+                  disabled={
+                    actionLoading ||
+                    !hasUnsavedChanges
+                  }
                 >
                   {actionLoading
                     ? "Saving..."
-                    : "Save Correction"}
+                    : hasUnsavedChanges
+                      ? "Save Correction"
+                      : "No Changes to Save"}
                 </button>
 
               </div>
-
             )}
 
-
-            {/* ====================================
-                REVIEW COMMENT
-            ==================================== */}
+            {/* Review Comment */}
 
             {isPending && (
 
@@ -1105,6 +1091,7 @@ function App() {
 
                 <textarea
                   value={comment}
+                  disabled={actionLoading}
                   onChange={(event) =>
                     setComment(
                       event.target.value
@@ -1114,28 +1101,30 @@ function App() {
                   rows={4}
                 />
 
-
-                {/* ==================================
-                    ACTION BUTTONS
-                ================================== */}
+                {/* Action Buttons */}
 
                 <div className="actions">
 
                   <button
                     className="approve"
                     onClick={approveDocument}
-                    disabled={actionLoading}
+                    disabled={
+                      actionLoading ||
+                      hasUnsavedChanges
+                    }
                   >
                     {actionLoading
                       ? "Processing..."
                       : "Approve"}
                   </button>
 
-
                   <button
                     className="send-back"
                     onClick={sendBackDocument}
-                    disabled={actionLoading}
+                    disabled={
+                      actionLoading ||
+                      hasUnsavedChanges
+                    }
                   >
                     {actionLoading
                       ? "Processing..."
@@ -1145,13 +1134,9 @@ function App() {
                 </div>
 
               </div>
-
             )}
 
-
-            {/* ====================================
-                COMPLETED REVIEW
-            ==================================== */}
+            {/* Completed Review */}
 
             {!isPending && (
 
@@ -1168,7 +1153,6 @@ function App() {
                 </strong>
 
               </div>
-
             )}
 
           </div>
