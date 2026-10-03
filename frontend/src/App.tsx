@@ -1,7 +1,10 @@
 import { useEffect, useState } from "react";
 import axios from "axios";
 import "./App.css";
+
 import ReviewQueue from "./ReviewQueue";
+import AuditLogs from "./AuditLogs";
+import Documents from "./Documents";
 
 const API_URL = "http://127.0.0.1:8000";
 
@@ -92,8 +95,23 @@ function getDocumentIdFromUrl(): number {
 function App() {
   const documentId = getDocumentIdFromUrl();
 
+  // ==================================================
+  // Page routes
+  // ==================================================
+
   const isReviewQueuePage =
     window.location.pathname === "/review-queue";
+
+  const isAuditLogsPage =
+    window.location.pathname === "/audit-logs";
+
+  const isDocumentsPage =
+    window.location.pathname === "/documents";
+
+  const isStandalonePage =
+    isReviewQueuePage ||
+    isAuditLogsPage ||
+    isDocumentsPage;
 
   // ==================================================
   // Main data
@@ -159,11 +177,9 @@ function App() {
 
   useEffect(() => {
     const loadDocument = async () => {
-
-      // IMPORTANT:
-      // Review Queue has its own API and does not
-      // need to load document #1.
-      if (isReviewQueuePage) {
+      // Standalone pages have their own API/data loading.
+      // Do not try to load document #1 on these pages.
+      if (isStandalonePage) {
         setLoading(false);
         return;
       }
@@ -216,10 +232,11 @@ function App() {
 
         setComment("");
 
-      } catch (err) {
+      } catch (err: any) {
         console.error(err);
 
         setError(
+          err.response?.data?.detail ||
           "Failed to load document."
         );
 
@@ -230,7 +247,7 @@ function App() {
 
     loadDocument();
 
-  }, [documentId, isReviewQueuePage]);
+  }, [documentId, isStandalonePage]);
 
   // ==================================================
   // Get evidence
@@ -502,11 +519,19 @@ function App() {
   };
 
   // ==================================================
-  // Review Queue Page
+  // Standalone Pages
   // ==================================================
 
   if (isReviewQueuePage) {
     return <ReviewQueue />;
+  }
+
+  if (isAuditLogsPage) {
+    return <AuditLogs />;
+  }
+
+  if (isDocumentsPage) {
+    return <Documents />;
   }
 
   // ==================================================
@@ -561,6 +586,26 @@ function App() {
     data.review_status === "PENDING";
 
   // ==================================================
+  // Navigation helpers
+  // ==================================================
+
+  const goToDashboard = () => {
+    window.location.href = "/";
+  };
+
+  const goToDocuments = () => {
+    window.location.href = "/documents";
+  };
+
+  const goToReviewQueue = () => {
+    window.location.href = "/review-queue";
+  };
+
+  const goToAuditLogs = () => {
+    window.location.href = "/audit-logs";
+  };
+
+  // ==================================================
   // Render Human Review
   // ==================================================
 
@@ -580,24 +625,27 @@ function App() {
         <nav>
 
           <button
-            onClick={() => {
-              window.location.href = "/";
-            }}
+            onClick={goToDashboard}
           >
             Dashboard
           </button>
 
-          <button>
+          <button
+            onClick={goToDocuments}
+          >
             Documents
           </button>
 
           <button
-            onClick={() => {
-              window.location.href =
-                "/review-queue";
-            }}
+            onClick={goToReviewQueue}
           >
             Review Queue
+          </button>
+
+          <button
+            onClick={goToAuditLogs}
+          >
+            Audit Logs
           </button>
 
         </nav>
@@ -972,32 +1020,32 @@ function App() {
             {data.validation &&
               data.validation.issues.length > 0 && (
 
-              <div className="validation-box">
+                <div className="validation-box">
 
-                <strong>
-                  Validation Issues
-                </strong>
+                  <strong>
+                    Validation Issues
+                  </strong>
 
-                {data.validation.issues.map(
-                  (issue, index) => (
+                  {data.validation.issues.map(
+                    (issue, index) => (
 
-                    <p key={index}>
+                      <p key={index}>
 
-                      <b>
-                        {issue.severity}
-                      </b>
+                        <b>
+                          {issue.severity}
+                        </b>
 
-                      {" — "}
+                        {" — "}
 
-                      {issue.message}
+                        {issue.message}
 
-                    </p>
+                      </p>
 
-                  )
-                )}
+                    )
+                  )}
 
-              </div>
-            )}
+                </div>
+              )}
 
             {/* Evidence */}
 
@@ -1049,6 +1097,7 @@ function App() {
                       )}
 
                     </div>
+
                   )
                 )}
 
